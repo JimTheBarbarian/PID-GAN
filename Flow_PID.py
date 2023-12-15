@@ -12,6 +12,95 @@ from torch.utils.data import TensorDataset, DataLoader
 class Generator(nn.Module):
     def __init__(self, in_dim, out_dim, hid_dim = 50, num_layers = 4):
         super(Generator,self).__init__()
+
+        def block(in_feat,out_feat):
+            layers = [nn.Linear(in_feat,out_feat)]
+            layers.append(nn.Tanh())
+            return layers
+        
+        self.layers = block(in_dim,hid_dim)
+
+        for layer_i in range(num_layers-1):
+            self.layers += block(hid_dim,out_dim)
+        
+        self.layers.append(nn.Linear(hid_dim,out_dim))
+        self.model = nn.Sequential(*self.layers)
+
+    def forward(self,x):
+        out = self.model(x)
+        return out
+    
+
+
+class Discriminator(nn.Module):
+    def __init__(self, in_dim, out_dim, hid_dim = 50, num_layers = 2):
+        super(Discriminator, self).__init__()
+        
+        def block(in_feat, out_feat):
+            layers = [nn.Linear(in_feat, out_feat)]
+            layers.append(nn.Tanh())
+            return layers
+
+        self.layers = block(in_dim, hid_dim)
+            
+        for layer_i in range(num_layers - 1):
+            self.layers += block(hid_dim, hid_dim)
+                
+        self.layers.append(nn.Linear(hid_dim, out_dim))
+        self.model = nn.Sequential(*self.layers)
+        
+    def forward(self, x):
+        out = self.model(x)
+        return out
+
+
+
+class Q_Net(nn.Module):
+    def __init__(self, in_dim, out_dim, hid_dim = 50, num_layers = 4):
+        super(Q_Net, self).__init__()
+        
+        def block(in_feat, out_feat):
+            layers = [nn.Linear(in_feat, out_feat)]
+            layers.append(nn.Tanh())
+            return layers
+        
+        self.layers = block(in_dim, hid_dim)
+            
+        for layer_i in range(num_layers - 1):
+            self.layers += block(hid_dim, hid_dim)
+                
+        self.layers.append(nn.Linear(hid_dim, out_dim))
+        self.model = nn.Sequential(*self.layers)
+        
+    def forward(self, x):
+        out = self.model(x)
+        return out
+    
+
+class Net(nn.Module):
+    def __init__(self, in_dim, out_dim, hid_dim = 50, num_layers = 4, rate = 0.2):
+        super(Net, self).__init__()
+        
+        def block(in_feat, out_feat, dropout = False):
+            layers = [nn.Linear(in_feat, out_feat)]
+            layers.append(nn.Tanh())
+            if dropout:
+                layers.append(nn.Dropout(rate))
+            return layers
+        
+        self.layers = block(in_dim, hid_dim, dropout=False)
+            
+        for layer_i in range(num_layers - 1):
+            self.layers += block(hid_dim, hid_dim, dropout = True)
+                
+        self.layers.append(nn.Linear(hid_dim, out_dim))
+        self.model = nn.Sequential(*self.layers)
+        
+    def forward(self, x):
+        out = self.model(x)
+        return out
+        
+
         
 
 
@@ -74,9 +163,83 @@ class Flow_PID:
         return gen_loss
     
 
+    def boundary_1_loss(self, train_x_b1, generator, k_generator, q = 1.):
+        z_prior = self.sample_noise(number = train_x_b1.shape[0]) 
+        x1 = torch.tensor(train_x_b1[:,0:1], requires_grad=True).float().to(self.device)
+        x2 = torch.tensor(train_x_b1[:,1:2], requires_grad=True).float().to(self.device)
+        u = generator(torch.cat([x1, x2, z_prior], dim=1))
+        u_x1 = torch.autograd.grad(
+                u, x1, 
+                grad_outputs=torch.ones_like(u),
+                retain_graph=True,
+                create_graph=True
+        )[0]
+        k = k_generator(u)
+        temp = q + k * u_x1
+        return (temp**2).mean()
+
+    def boundary_2_loss(self, train_x_b2, generator):
+        z_prior = self.sample_noise(number = train_x_b2.shape[0]) 
+        x1 = torch.tensor(train_x_b2[:,0:1], requires_grad=True).float().to(self.device)
+        x2 = torch.tensor(train_x_b2[:,1:2], requires_grad=True).float().to(self.device)
+        u = generator(torch.cat([x1, x2, z_prior], dim=1))
+        u_x2 = torch.autograd.grad(
+                u, x2, 
+                grad_outputs=torch.ones_like(u),
+                retain_graph=True,
+                create_graph=True
+        )[0]
+        return (u_x2**2).mean()
+
+    def boundary_3_loss(self, train_x_b3, generator, u_0= -10):
+        z_prior = self.sample_noise(number = train_x_b3.shape[0]) 
+        x1 = torch.tensor(train_x_b3[:,0:1], requires_grad=True).float().to(self.device)
+        x2 = torch.tensor(train_x_b3[:,1:2], requires_grad=True).float().to(self.device)
+        u = generator(torch.cat([x1, x2, z_prior], dim=1))
+        temp = u - u_0
+        return (temp**2).mean()
+
+    def boundary_4_loss(self, train_x_b4, generator):
+        z_prior = self.sample_noise(number = train_x_b4.shape[0]) 
+        x1 = torch.tensor(train_x_b4[:,0:1], requires_grad=True).float().to(self.device)
+        x2 = torch.tensor(train_x_b4[:,1:2], requires_grad=True).float().to(self.device)
+        u = generator(torch.cat([x1, x2, z_prior], dim=1))
+        u_x2 = torch.autograd.grad(
+                u, x2, 
+                grad_outputs=torch.ones_like(u),
+                retain_graph=True,
+                create_graph=True
+        )[0]
+        return (u_x2**2).mean()
+
     def phy_residual(self, x1, x2, u, k):
-        phyloss = ""
-        return phyloss
+        """ The pytorch autograd version of calculating residual """
+        u_x1 = torch.autograd.grad(
+            u, x1, 
+            grad_outputs=torch.ones_like(u),
+            retain_graph=True,
+            create_graph=True
+        )[0]
+        u_x2 = torch.autograd.grad(
+            u, x2, 
+            grad_outputs=torch.ones_like(u),
+            retain_graph=True,
+            create_graph=True
+        )[0]
+        f_1 = torch.autograd.grad(
+            k*u_x1, x1, 
+            grad_outputs=torch.ones_like(u_x1),
+            retain_graph=True,
+            create_graph=True
+        )[0]
+        f_2 = torch.autograd.grad(
+            k*u_x2, x2, 
+            grad_outputs=torch.ones_like(u_x2),
+            retain_graph=True,
+            create_graph=True
+        )[0]
+        f = f_1 + f_2
+        return f
 
 
         
