@@ -7,28 +7,72 @@ from scipy.interpolate import griddata
 from torch.utils.data import TensorDataset, DataLoader
 
 
-
-
-class Generator(nn.Module):
+class K_Generator(nn.Module):
     def __init__(self, in_dim, out_dim, hid_dim = 50, num_layers = 4):
-        super(Generator,self).__init__()
-
-        def block(in_feat,out_feat):
-            layers = [nn.Linear(in_feat,out_feat)]
+        super(K_Generator, self).__init__()
+        
+        def block(in_feat, out_feat):
+            layers = [nn.Linear(in_feat, out_feat)]
             layers.append(nn.Tanh())
             return layers
         
-        self.layers = block(in_dim,hid_dim)
-
-        for layer_i in range(num_layers-1):
-            self.layers += block(hid_dim,out_dim)
-        
-        self.layers.append(nn.Linear(hid_dim,out_dim))
+        self.layers = block(in_dim, hid_dim)
+            
+        for layer_i in range(num_layers - 1):
+            self.layers += block(hid_dim, hid_dim)
+                
+        self.layers.append(nn.Linear(hid_dim, out_dim))
         self.model = nn.Sequential(*self.layers)
-
-    def forward(self,x):
+        
+    def forward(self, x):
         out = self.model(x)
         return out
+
+class Generator(nn.Module):
+    def __init__(self) -> None:
+        super(Generator, self).__init__()
+        self.main = nn.Sequential(
+            # Input is 4, going into a convolution.
+            nn.ConvTranspose2d(1, 64, (4,4), (2,2), (1,1), bias=False),
+            nn.BatchNorm2d(64),
+            nn.ReLU(True),
+            # state size. 64 x 4 x 4
+            nn.ConvTranspose2d(64, 128, (4, 4), (2, 2), (1, 1), bias=False),
+            nn.BatchNorm2d(256),
+            nn.ReLU(True),
+            # state size. 128 x 8 x 8
+            nn.ConvTranspose2d(128,64 , (4, 4), (2, 2), (1, 1), bias=False),
+            nn.BatchNorm2d(128),
+            nn.ReLU(True),
+            # state size. 64 x 16 x 16
+            nn.ConvTranspose2d(64, 32, (4, 4), (2, 2), (1, 1), bias=False),
+            nn.BatchNorm2d(64),
+            nn.ReLU(True),
+            # state size. 32 x 32 x 32
+            nn.ConvTranspose2d(32, 1, (4, 4), (2, 2), (1, 1), bias=True),
+            nn.Tanh()
+            # state size. 1 x 64 x 64
+        )
+
+    def forward(self, x):
+        return self._forward_impl(x)
+
+    # Support PyTorch.script function.
+    def _forward_impl(self, x):
+        out = self.main(x)
+
+        return out
+
+    def _initialize_weights(self) -> None:
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.normal_(m.weight, 0.0, 0.02)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.normal_(m.weight, 1.0, 0.02)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
     
 
 
@@ -118,7 +162,17 @@ class Flow_PID:
         self.train_x_u = torch.tensor(x_u, requires_grad=True).float().to(device)
         self.train_y_u = torch.tensor(y_u, requires_grad=True).float().to(device)
 
-                # train loader
+
+
+        # boundary point
+        self.train_x_b1 = torch.tensor(x_b[:, 0:2], requires_grad=True).float().to(device)
+        self.train_x_b2 = torch.tensor(x_b[:, 2:4], requires_grad=True).float().to(device)
+        self.train_x_b3 = torch.tensor(x_b[:, 4:6], requires_grad=True).float().to(device)
+        self.train_x_b4 = torch.tensor(x_b[:, 6:8], requires_grad=True).float().to(device)
+        # collocation point
+        self.train_x_f = torch.tensor(x_f, requires_grad=True).float().to(device)
+
+        # train loader
         batch_size = N_u
         shuffle = True
         self.train_loader = DataLoader(

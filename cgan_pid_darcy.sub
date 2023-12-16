@@ -1,0 +1,16 @@
+#!/bin/bash
+
+#SBATCH -A JACKX_LAB_GPU
+#SBATCH --job-name=cgan_pid
+#SBATCH -p gpu
+#SBATCH -N 1                  ## run on a single node
+#SBATCH -n 1                  ## request one task (one CPU)
+#SBATCH -t 06:00:00         ## 1-day run time limit
+#SBATCH --mem=20000
+#SBATCH --gres=gpu:A100:1
+
+module load anaconda/2021.11
+source /opt/apps/anaconda/2021.11/etc/profile.d/conda.sh
+conda activate spect_env
+
+python train.py
